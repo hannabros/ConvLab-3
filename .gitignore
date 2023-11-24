@@ -13,6 +13,9 @@ __pycache__
 # vscode
 .vscode
 
+# venv
+.venv/
+
 # data
 data/unified_datasets/multiwoz21/MultiWOZ_2.1.zip
 data/unified_datasets/sgd/dstc8-schema-guided-dialogue-master.zip
@@ -68,6 +71,7 @@ convlab/nlu/jointBERT/multiwoz/configs/multiwoz_new_usr_context.json
 convlab/nlu/milu/multiwoz/configs/system_without_context.jsonnet
 convlab/nlu/milu/multiwoz/configs/user_without_context.jsonnet\
 *.pkl
+output/*
 
 # test script
 *_test.py
