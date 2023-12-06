@@ -53,7 +53,8 @@ class LLM_NLU(NLU):
       """Start with the same number from [USER UTTERANCE] and each user utterance should place with <UT> token and end with </UT>. """\
       """Right after </UT> token, dialogue acts of each utterance should place with <DA> token and end with </DA> token. \n"""\
       """For example: “1. <DA>[["inform", "hotel", "name", "abc"]]</DA>”. \n"""\
-      """Do not generate intents, doamins, slots that are not defined above.\n[/INSTRUCTION]""",
+      """Do not generate intents, domains, slots that are not defined above.\n""",
+      """Do not generate intents, domains, slots of [DIALOGUE]. Only generate intents, domains, slots of [USER UTTERANCE]\n[/INSTRUCTION]""",
       """[DIALOGUE]\n"""+f"""{{dialogue}}""",
     ])
 
@@ -94,13 +95,13 @@ class LLM_NLU(NLU):
     self.system_instruction = self.system_instruction.replace('{{example}}', examples)
     self.system_instruction = self.system_instruction.replace('{{dialogue}}', utteracnes_text)
     self.model.set_system_instruction(self.system_instruction)
-    user_texts = """[USER UTTERANCE]]\n"""+f"""{{user_utterance}}\n"""
+    user_texts = """[USER UTTERANCE]\n"""
     if not no_to_new_predict:
       for i, user_text in enumerate(texts):
-        user_texts += f'{i+1}. user: {user_text}'
+        user_texts += f'{i+1}. user: {user_text}\n\n'
     else:
       for i, user_text in zip(no_to_new_predict, texts):
-        user_texts += f'{i}. user: {user_text}'
+        user_texts += f'{i}. user: {user_text}\n\n'
     response = self.model.chat(user_texts)
     self.model.clear_chat_history()
     return response
@@ -116,7 +117,7 @@ def get_texts_contexts(dialogue, no_to_new_predict=False):
   if not no_to_new_predict:
     return texts, utterances
   else:
-    texts_to_new_predict = [text for idx, text in enumerate(texts) if idx+1 in no_to_new_predict]
+    texts_to_new_predict = [text for idx, text in enumerate(texts) if str(idx+1) in no_to_new_predict]
     return texts_to_new_predict, utterances
 
 def get_example_dialoges(dataset, domains, cnt=3, turn_threshold=10):
@@ -147,7 +148,7 @@ def get_clean_result_by_id(dialogue_id, clean_results):
 
 if __name__ == "__main__":
   config = configparser.ConfigParser()
-  config.read('nlu_config.ini')
+  config.read('./llm_tod/nlu_config.ini')
 
   dataset_name = config.get('DATASET', 'name')
   api_type = config.get('API', 'name')
@@ -155,63 +156,74 @@ if __name__ == "__main__":
   clean_result_path = config.get('CLEAN', 'path')
 
   dataset = load_dataset(dataset_name)
-  fout = f'llm_output/merge/{dataset_name}_{model_name.replace("/", "_")}_nlu_all_merge.json'
+  fout = f'./llm_tod/llm_output/merge/{dataset_name}_{model_name.replace("/", "_")}_nlu_all_merge.json'
   with open(clean_result_path, 'r') as f:
     clean_results = json.load(f)
 
   # gpt_model : gpt-3.5-turbo, gpt-4-1106-preview
   nlu = LLM_NLU(dataset_name=dataset_name, api_type=api_type, model_name_or_path=model_name, speaker='user')
   # nlu = LLM_NLU('multiwoz21', 'huggingface', 'Llama-2-7b-chat-hf', 'user', example_dialogs)
-  test_datasets = dataset['test']
+  test_datasets = dataset['test'][102:]
   normalizer = NormalizeNLU(test_datasets)
 
   dataset_pred_das = []
   print(f'Total test dataset: {len(test_datasets)}')
   for test_data in tqdm(test_datasets):
-    gold_no = len(normalizer.gold_user_da_list)
-    clean_result = get_clean_result_by_id(dialogue_id, clean_results)
     domains = test_data['domains']
     example_dialogs = get_example_dialoges(dataset, domains)
+    dialogue_id = test_data['dialogue_id']
+    clean_result = get_clean_result_by_id(dialogue_id, clean_results)
+    gold_no = len(normalizer.get_gold_user_da_by_id(dialogue_id))
+    if clean_result['das'] == 'FAIL':
+      clean_result['num_not_in_response'] = [str(i) for i in range(gold_no)]
     pred_cnt = 0 # normalize 완료한 대화 개수
     add_no = [] # 수집해야 할 대화 index
     pred_das_merge = {}
-    while pred_cnt < gold_no:
-      dialogue_id = test_data['dialogue_id']
+    max_cnt = 0
+    while pred_cnt < gold_no and max_cnt < 10:
       if clean_result['das'] == 'FAIL' and len(add_no) == 0:
         texts, utterances = get_texts_contexts(test_data)
         response = nlu.predict(texts, utterances, domains, example_dialogs)
         pred_das = normalizer.get_pred_das(dialogue_id, response)
-        if not pred_das:
-          pred_das_merge = pred_das
+        if pred_das:
+          pred_das_merge = copy.deepcopy(pred_das)
           add_no = pred_das['num_not_in_response']
           pred_cnt += len(pred_das['das'])
-      elif clean_result['num_not_in_reponse'] > 0 and len(add_no) == 0:
-        no_to_new_predict = clean_result['num_not_in_reponse']
+      elif len(clean_result['num_not_in_response']) > 0 and len(add_no) == 0:
+        no_to_new_predict = clean_result['num_not_in_response']
+        no_to_new_predict = [str(int(no)+1) for no in no_to_new_predict]
         texts, utterances = get_texts_contexts(test_data, no_to_new_predict)
         response = nlu.predict(texts, utterances, domains, example_dialogs, no_to_new_predict)
         pred_das = normalizer.get_pred_das(dialogue_id, response)
-        if not pred_das:
+        if pred_das:
           pred_das_merge = copy.deepcopy(clean_result)
-          for k, v in clean_result['das']:
-            pred_das_merge['das'][k] = v
-          add_no = pred_das['num_not_in_response']
-          pred_cnt += len(pred_das['das'])
-      elif clean_result['num_not_in_response'] == 0:
+          for k, v in pred_das['das'].items():
+            if k not in pred_das_merge['das']:
+              pred_das_merge['das'][k] = v
+          add_no = [str(no+1) for no in range(gold_no) if str(no+1) not in list(pred_das_merge['das'].keys())]
+          pred_cnt = len(pred_das_merge['das'])
+      elif len(clean_result['num_not_in_response']) == 0:
         pred_das_merge = clean_result
         pred_cnt = len(clean_result['das'])
       elif len(add_no) > 0:
         texts, utterances = get_texts_contexts(test_data, add_no)
         response = nlu.predict(texts, utterances, domains, example_dialogs, add_no)
         pred_das = normalizer.get_pred_das(dialogue_id, response)
-        if not pred_das:
-          for k, v in pred_das['das']:
-            pred_das_merge['das'][k] = v
-          add_no = pred_das['num_not_in_response']
-          pred_cnt += len(pred_das['das'])
-    dataset_pred_das.append(pred_das_merge)
+        if pred_das:
+          for k, v in pred_das['das'].items():
+            if k not in pred_das_merge['das']:
+              pred_das_merge['das'][k] = v
+          add_no = [str(no+1) for no in range(gold_no) if str(no+1) not in list(pred_das_merge['das'].keys())]
+          pred_cnt = len(pred_das_merge['das'])
+      max_cnt += 1
+      # print(pred_cnt)
+    if max_cnt < 10:
+      dataset_pred_das.append(pred_das_merge)
+      with open(fout, 'a') as f:
+        f.write(f'{json.dumps(pred_das_merge, ensure_ascii=False)}\n')
 
-    with open(fout, 'w') as f:
-      json.dump(dataset_pred_das, f)
+    # with open(fout, 'w') as f:
+    #   json.dump(dataset_pred_das, f)
     
     # print(predictions)
     # dialogue_predictions = {'id': dialogue_id, 'predictions': predictions, 'response': raw_response}

@@ -138,8 +138,8 @@ def get_das_texts(dialogue, no_to_new_generate=False):
   if not no_to_new_generate:
     return dialogue_acts, texts
   else:
-    dialogue_acts_to_new_generate = [da for idx, da in enumerate(dialogue_acts) if idx+1 in no_to_new_generate]
-    texts_to_new_generate = [text for idx, text in enumerate(texts) if idx+1 in no_to_new_generate]
+    dialogue_acts_to_new_generate = [da for idx, da in enumerate(dialogue_acts) if str(idx+1) in no_to_new_generate]
+    texts_to_new_generate = [text for idx, text in enumerate(texts) if str(idx+1) in no_to_new_generate]
     return dialogue_acts_to_new_generate, texts_to_new_generate
   
 def get_example_dialoges(dataset, domains, cnt=3, turn_threshold=10):
@@ -170,7 +170,7 @@ def get_clean_result_by_id(dialogue_id, clean_results):
 
 if __name__ == "__main__":
   config = configparser.ConfigParser()
-  config.read('nlg_config.ini')
+  config.read('./llm_tod/nlg_config.ini')
 
   dataset_name = config.get('DATASET', 'name')
   api_type = config.get('API', 'name')
@@ -178,7 +178,7 @@ if __name__ == "__main__":
   clean_result_path = config.get('CLEAN', 'path')
 
   dataset = load_dataset(dataset_name)
-  fout = f'llm_output/merge/{dataset_name}_{model_name.replace("/", "_")}_nlg_all_merge.json'
+  fout = f'./llm_tod/llm_output/merge/{dataset_name}_{model_name.replace("/", "_")}_nlg_all_merge.json'
   with open(clean_result_path, 'r') as f:
     clean_results = json.load(f)
 
@@ -190,51 +190,57 @@ if __name__ == "__main__":
   dataset_sys_rsp = []
   print(f'Total test dataset: {len(test_datasets)}')
   for test_data in tqdm(test_datasets):
-    gold_no = len(normalizer.gold_sys_response_list)
-    clean_result = get_clean_result_by_id(dialogue_id, clean_results)
     domains = test_data['domains']
     dialogue_id = test_data['dialogue_id']
     example_dialogs = get_example_dialoges(dataset, domains)
+    gold_no = len(normalizer.get_gold_sys_response_by_id(dialogue_id))
+    clean_result = get_clean_result_by_id(dialogue_id, clean_results)
+    if clean_result['sys_rsp'] == 'FAIL':
+      clean_result['num_not_in_response'] = [str(i) for i in range(gold_no)]
     rsp_cnt = 0 # normalize 완료한 대화 개수
     add_no = [] # 수집해야 할 대화 index
     sys_rsp_merge = {}
-    while rsp_cnt < gold_no:
+    max_cnt = 0
+    while rsp_cnt < gold_no and max_cnt < 10:
       if clean_result['sys_rsp'] == 'FAIL' and len(add_no) == 0:
         dialogue_acts, texts = get_das_texts(test_data)
         response = nlg.generate(dialogue_acts, texts, example_dialogs, domains)
         pred_sys_rsp = normalizer.get_pred_sys_rsp(dialogue_id, response)
-        if not pred_sys_rsp:
+        if pred_sys_rsp:
           sys_rsp_merge = pred_sys_rsp
           add_no = pred_sys_rsp['num_not_in_response']
           rsp_cnt += len(pred_sys_rsp['sys_rsp'])
-      elif clean_result['num_not_in_reponse'] > 0 and len(add_no) == 0:
-        no_to_new_generate = clean_result['num_not_in_reponse']
+      elif len(clean_result['num_not_in_response']) > 0 and len(add_no) == 0:
+        no_to_new_generate = clean_result['num_not_in_response']
+        no_to_new_generate = [str(int(no)+1) for no in no_to_new_generate]
         dialogue_acts, texts = get_das_texts(test_data, no_to_new_generate)
         response = nlg.generate(dialogue_acts, texts, example_dialogs, domains, no_to_new_generate)
         pred_sys_rsp = normalizer.get_pred_sys_rsp(dialogue_id, response)
-        if not pred_sys_rsp:
+        if pred_sys_rsp:
           sys_rsp_merge = copy.deepcopy(clean_result)
-          for k, v in clean_result['sys_rsp']:
-            sys_rsp_merge['sys_rsp'][k] = v
-          add_no = pred_sys_rsp['num_not_in_response']
-          rsp_cnt += len(pred_sys_rsp['sys_rsp'])
-      elif clean_result['num_not_in_response'] == 0:
+          for k, v in pred_sys_rsp['sys_rsp'].items():
+            if k not in sys_rsp_merge['sys_rsp']:
+              sys_rsp_merge['sys_rsp'][k] = v
+          add_no = [str(no+1) for no in range(gold_no) if str(no+1) not in list(sys_rsp_merge['sys_rsp'].keys())]
+          rsp_cnt = len(sys_rsp_merge['sys_rsp'])
+      elif len(clean_result['num_not_in_response']) == 0:
         sys_rsp_merge = clean_result
         rsp_cnt = len(clean_result['sys_rsp'])
       elif len(add_no) > 0:
         dialogue_acts, texts = get_das_texts(test_data, add_no)
         response = nlg.generate(dialogue_acts, texts, example_dialogs, domains, add_no)
         pred_sys_rsp = normalizer.get_pred_sys_rsp(dialogue_id, response)
-        if not pred_sys_rsp:
-          for k, v in pred_sys_rsp['sys_rsp']:
-            sys_rsp_merge['sys_rsp'][k] = v
-          add_no = pred_sys_rsp['num_not_in_response']
-          rsp_cnt += len(pred_sys_rsp['sys_rsp'])
-    dataset_sys_rsp.append(sys_rsp_merge)    
-
-    with open(fout, 'w') as f:
-      json.dump(dataset_sys_rsp, f)
-
+        if pred_sys_rsp:
+          for k, v in pred_sys_rsp['sys_rsp'].items():
+            if k not in sys_rsp_merge['sys_rsp']:
+              sys_rsp_merge['sys_rsp'][k] = v
+          add_no = [str(no+1) for no in range(gold_no) if str(no+1) not in list(sys_rsp_merge['sys_rsp'].keys())]
+          rsp_cnt += len(sys_rsp_merge['sys_rsp'])
+      max_cnt += 1
+    if max_cnt < 10:
+      dataset_sys_rsp.append(sys_rsp_merge)    
+      with open(fout, 'a') as f:
+        f.write(f'{json.dumps(sys_rsp_merge, ensure_ascii=False)}\n')
 
     # dialogue_acts, texts = get_das_texts(test_data)
     # predictions, raw_response = nlg.generate(dialogue_acts, texts, example_dialogs, domains)

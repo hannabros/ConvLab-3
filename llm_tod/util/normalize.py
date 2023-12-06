@@ -169,7 +169,7 @@ class NormalizeNLU():
       last_num = int(re.match(r'\d+', num_to_da_matches[-1]).group(0))
       for num_to_da_match in num_to_da_matches:
         no, match_json = self._match_to_json(num_to_da_match)
-        pred_das['das'][no] = match_json
+        pred_das['das'][str(no)] = match_json
     except:
       return None
 
@@ -315,7 +315,7 @@ class NormalizeNLG():
         else:
           no, sys_rsp = self._get_sys_rsp(num_line, is_last=False)
         if sys_rsp:
-          pred_sys_rsp['sys_rsp'][no] = sys_rsp
+          pred_sys_rsp['sys_rsp'][str(no)] = sys_rsp
           num_success.append(no)
       assert len(num_success) > 0
     except:
