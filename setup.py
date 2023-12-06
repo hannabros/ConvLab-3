@@ -41,7 +41,7 @@ setup(
         'scipy',
         'tensorboard',
         'torch>=1.10.1,<=1.13',
-        'transformers>=4.17.0,<=4.24.0',
+        'transformers>=4.17.0,<=4.32.0',
         'sentence-transformers>=2.2.2',
         'datasets>=2.0',
         'seqeval',

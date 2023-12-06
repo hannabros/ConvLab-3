@@ -71,7 +71,7 @@ convlab/nlu/jointBERT/multiwoz/configs/multiwoz_new_usr_context.json
 convlab/nlu/milu/multiwoz/configs/system_without_context.jsonnet
 convlab/nlu/milu/multiwoz/configs/user_without_context.jsonnet\
 *.pkl
-output/*
+llm_tod/llm_output/*.json
 
 # test script
 *_test.py
