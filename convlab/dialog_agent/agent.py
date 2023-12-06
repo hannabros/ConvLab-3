@@ -175,7 +175,7 @@ class PipelineAgent(Agent):
         # get rid of reference problem
         self.output_action = deepcopy(self.policy.predict(state))
 
-        # get model response
+        # get model responseㅗㅁ
         if self.nlg is not None:
             model_response = self.nlg.generate(self.output_action)
         else:

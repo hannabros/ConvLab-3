@@ -3,12 +3,14 @@ import sys
 from convlab.nlu import NLU
 from convlab.base_models.llm.base import LLM
 from convlab.util import load_dataset, load_ontology, load_database
+from llm_tod.util.normalize import NormalizeNLU
 import json
 import re
 import random
 import configparser
 from tqdm import tqdm
 from collections import defaultdict
+import copy
 random.seed(1234)
 
 class LLM_NLU(NLU):
@@ -50,14 +52,14 @@ class LLM_NLU(NLU):
       """Each utterance is independent and must not take any other dialogue acts from another utterance. """
       """Start with the same number from [USER UTTERANCE] and each user utterance should place with <UT> token and end with </UT>. """\
       """Right after </UT> token, dialogue acts of each utterance should place with <DA> token and end with </DA> token. \n"""\
-      """For example: “1. <DA>[["inform", "hotel", "name": "abc"]]</DA>”. \n"""\
+      """For example: “1. <DA>[["inform", "hotel", "name", "abc"]]</DA>”. \n"""\
       """Do not generate intents, doamins, slots that are not defined above.\n[/INSTRUCTION]""",
       """[DIALOGUE]\n"""+f"""{{dialogue}}""",
     ])
 
     return system_instruction
 
-  def predict(self, texts, utterances, domains, example_dialogs):
+  def predict(self, texts, utterances, domains, example_dialogs, no_to_new_predict=False):
     filter_slots = {}
     for domain in domains:
       filter_slots[domain] = self.slots[domain]
@@ -93,63 +95,17 @@ class LLM_NLU(NLU):
     self.system_instruction = self.system_instruction.replace('{{dialogue}}', utteracnes_text)
     self.model.set_system_instruction(self.system_instruction)
     user_texts = """[USER UTTERANCE]]\n"""+f"""{{user_utterance}}\n"""
-    for i, user_text in enumerate(texts):
-      user_texts += f'{i+1}. user: {user_text}'
+    if not no_to_new_predict:
+      for i, user_text in enumerate(texts):
+        user_texts += f'{i+1}. user: {user_text}'
+    else:
+      for i, user_text in zip(no_to_new_predict, texts):
+        user_texts += f'{i}. user: {user_text}'
     response = self.model.chat(user_texts)
     self.model.clear_chat_history()
-    print(response)
-    dialogue_acts = self.normalize_response_to_dialogue_acts(response)
-    return dialogue_acts, response
+    return response
 
-  def normalize_response_to_dialogue_acts(self, response):
-    split_response = []
-    total_line = ""
-    for line in response.split('\n'):
-      line = line.strip()
-      if len(line) == 0:
-        continue
-      if re.match(r'^\d+\.', line):
-        if len(total_line) > 0:
-          split_response.append(total_line)
-        total_line = line
-      else:
-        if 'user: ' in line or '<DA>' in line:
-          total_line += line
-    if len(total_line) > 0:
-      split_response.append(total_line)
-    normalize_response = {}
-    no = ""
-    for line in split_response:
-      if re.match(r'^\d+', line):
-        no = re.match(r'^\d+', line).group(0)
-      else:
-        no = 'None'
-      ut_start_token, ut_end_token = "<UT>", "</UT>"
-      da_start_token, da_end_token = "<DA>", "</DA>"
-      ut_start_idx = line.find(ut_start_token)
-      ut_end_idx = line.find(ut_end_token)
-      da_start_idx = line.find(da_start_token)
-      da_end_idx = line.find(da_end_token)
-      if ut_start_idx == -1 or ut_start_idx == -1:
-        user_utterance = 'NO_MATCH_UT'
-      else:
-        user_utterance = line[ut_start_idx+len(ut_start_token):ut_end_idx].strip()
-      if da_start_idx == -1 or da_end_idx == -1:
-        dialogue_acts = 'NO_MATCH_DA'
-      else:
-        dialogue_acts = line[da_start_idx+len(da_start_token):da_end_idx].strip()
-      try:
-        dialogue_acts = json.loads(dialogue_acts)
-        dialogue_acts = [[elm if elm is not None else '' for elm in dialogue_act] for dialogue_act in dialogue_acts]
-        join_das = '<das>'.join(['|'.join(da) for da in dialogue_acts])
-        normalize_response[no] = {'utter': user_utterance, 'das': join_das}
-      except json.decoder.JSONDecodeError:
-        normalize_response[no] = {'utter': user_utterance, 'das': dialogue_acts}
-      except TypeError:
-        normalize_response[no] = {'utter': user_utterance, 'das': dialogue_acts}
-    return normalize_response
-
-def get_texts_contexts(dialogue):
+def get_texts_contexts(dialogue, no_to_new_predict=False):
   turns = dialogue['turns']
   texts = []
   utterances = []
@@ -157,7 +113,11 @@ def get_texts_contexts(dialogue):
     if turn['speaker'] == 'user':
       texts.append(turn['utterance'])
     utterances.append(turn['utterance'])
-  return texts, utterances
+  if not no_to_new_predict:
+    return texts, utterances
+  else:
+    texts_to_new_predict = [text for idx, text in enumerate(texts) if idx+1 in no_to_new_predict]
+    return texts_to_new_predict, utterances
 
 def get_example_dialoges(dataset, domains, cnt=3, turn_threshold=10):
   filter_dataset = []
@@ -179,6 +139,12 @@ def get_example_dialoges(dataset, domains, cnt=3, turn_threshold=10):
     sample = random.sample(example_dialogs, cnt)
   return sample
 
+def get_clean_result_by_id(dialogue_id, clean_results):
+  for result in clean_results:
+    result_id = result['id']
+    if dialogue_id == result_id:
+      return result
+
 if __name__ == "__main__":
   config = configparser.ConfigParser()
   config.read('nlu_config.ini')
@@ -186,23 +152,69 @@ if __name__ == "__main__":
   dataset_name = config.get('DATASET', 'name')
   api_type = config.get('API', 'name')
   model_name = config.get('MODEL', 'name')
+  clean_result_path = config.get('CLEAN', 'path')
 
   dataset = load_dataset(dataset_name)
-  fout = f'output/{dataset_name}_{model_name.replace("/", "_")}_nlu_all.json'
+  fout = f'llm_output/merge/{dataset_name}_{model_name.replace("/", "_")}_nlu_all_merge.json'
+  with open(clean_result_path, 'r') as f:
+    clean_results = json.load(f)
 
   # gpt_model : gpt-3.5-turbo, gpt-4-1106-preview
   nlu = LLM_NLU(dataset_name=dataset_name, api_type=api_type, model_name_or_path=model_name, speaker='user')
   # nlu = LLM_NLU('multiwoz21', 'huggingface', 'Llama-2-7b-chat-hf', 'user', example_dialogs)
   test_datasets = dataset['test']
+  normalizer = NormalizeNLU(test_datasets)
+
+  dataset_pred_das = []
   print(f'Total test dataset: {len(test_datasets)}')
   for test_data in tqdm(test_datasets):
-    texts, utterances = get_texts_contexts(test_data)
+    gold_no = len(normalizer.gold_user_da_list)
+    clean_result = get_clean_result_by_id(dialogue_id, clean_results)
     domains = test_data['domains']
-    dialogue_id = test_data['dialogue_id']
     example_dialogs = get_example_dialoges(dataset, domains)
-    predictions, raw_response = nlu.predict(texts, utterances, domains, example_dialogs)
+    pred_cnt = 0 # normalize 완료한 대화 개수
+    add_no = [] # 수집해야 할 대화 index
+    pred_das_merge = {}
+    while pred_cnt < gold_no:
+      dialogue_id = test_data['dialogue_id']
+      if clean_result['das'] == 'FAIL' and len(add_no) == 0:
+        texts, utterances = get_texts_contexts(test_data)
+        response = nlu.predict(texts, utterances, domains, example_dialogs)
+        pred_das = normalizer.get_pred_das(dialogue_id, response)
+        if not pred_das:
+          pred_das_merge = pred_das
+          add_no = pred_das['num_not_in_response']
+          pred_cnt += len(pred_das['das'])
+      elif clean_result['num_not_in_reponse'] > 0 and len(add_no) == 0:
+        no_to_new_predict = clean_result['num_not_in_reponse']
+        texts, utterances = get_texts_contexts(test_data, no_to_new_predict)
+        response = nlu.predict(texts, utterances, domains, example_dialogs, no_to_new_predict)
+        pred_das = normalizer.get_pred_das(dialogue_id, response)
+        if not pred_das:
+          pred_das_merge = copy.deepcopy(clean_result)
+          for k, v in clean_result['das']:
+            pred_das_merge['das'][k] = v
+          add_no = pred_das['num_not_in_response']
+          pred_cnt += len(pred_das['das'])
+      elif clean_result['num_not_in_response'] == 0:
+        pred_das_merge = clean_result
+        pred_cnt = len(clean_result['das'])
+      elif len(add_no) > 0:
+        texts, utterances = get_texts_contexts(test_data, add_no)
+        response = nlu.predict(texts, utterances, domains, example_dialogs, add_no)
+        pred_das = normalizer.get_pred_das(dialogue_id, response)
+        if not pred_das:
+          for k, v in pred_das['das']:
+            pred_das_merge['das'][k] = v
+          add_no = pred_das['num_not_in_response']
+          pred_cnt += len(pred_das['das'])
+    dataset_pred_das.append(pred_das_merge)
+
+    with open(fout, 'w') as f:
+      json.dump(dataset_pred_das, f)
+    
     # print(predictions)
-    dialogue_predictions = {'id': dialogue_id, 'predictions': predictions, 'response': raw_response}
+    # dialogue_predictions = {'id': dialogue_id, 'predictions': predictions, 'response': raw_response}
     # print(dialogue_predictions)
-    with open(fout, 'a') as f:
-      f.write(f'{json.dumps(dialogue_predictions, ensure_ascii=False)}\n')
+    # with open(fout, 'a') as f:
+    #   f.write(f'{json.dumps(dialogue_predictions, ensure_ascii=False)}\n')
