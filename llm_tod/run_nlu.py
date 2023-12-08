@@ -147,8 +147,12 @@ def get_clean_result_by_id(dialogue_id, clean_results):
       return result
 
 if __name__ == "__main__":
+  if len(sys.argv) == 2:
+    config_file = sys.argv[1]
+  else:
+    config_file = './llm_tod/nlu_config.ini'
   config = configparser.ConfigParser()
-  config.read('./llm_tod/nlu_config.ini')
+  config.read(config_file)
 
   dataset_name = config.get('DATASET', 'name')
   api_type = config.get('API', 'name')
@@ -163,7 +167,7 @@ if __name__ == "__main__":
   # gpt_model : gpt-3.5-turbo, gpt-4-1106-preview
   nlu = LLM_NLU(dataset_name=dataset_name, api_type=api_type, model_name_or_path=model_name, speaker='user')
   # nlu = LLM_NLU('multiwoz21', 'huggingface', 'Llama-2-7b-chat-hf', 'user', example_dialogs)
-  test_datasets = dataset['test'][102:]
+  test_datasets = dataset['test']
   normalizer = NormalizeNLU(test_datasets)
 
   dataset_pred_das = []

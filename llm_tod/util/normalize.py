@@ -238,6 +238,8 @@ class NormalizeNLG():
           tmp = []
       if is_start:
         tmp.append(line)
+    if len(tmp) > 0:
+      num_lines.append(''.join(tmp))
     return num_lines
 
   def _match_sut_token(self, response):

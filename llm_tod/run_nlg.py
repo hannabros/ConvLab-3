@@ -1,5 +1,6 @@
 import os
 import sys
+sys.path.append("/home3/hgsun/ConvLab-3")
 import copy
 from convlab.nlg import NLG
 from convlab.base_models.llm.base import LLM
@@ -123,6 +124,7 @@ class LLM_NLG(NLG):
         prompt += f'{i}. '+self.opponent+': '+text+'\n'
         prompt += '<DA>'+json.dumps(format_da)+'</DA>'+'\n\n'
       response = self.model.chat(prompt)
+    print(response)
     self.model.clear_chat_history()
     return response
 
@@ -169,8 +171,12 @@ def get_clean_result_by_id(dialogue_id, clean_results):
       return result
 
 if __name__ == "__main__":
+  if len(sys.argv) == 2:
+    config_file = sys.argv[1]
+  else:
+    config_file = './llm_tod/nlg_config.ini'
   config = configparser.ConfigParser()
-  config.read('./llm_tod/nlg_config.ini')
+  config.read(config_file)
 
   dataset_name = config.get('DATASET', 'name')
   api_type = config.get('API', 'name')
@@ -179,6 +185,7 @@ if __name__ == "__main__":
 
   dataset = load_dataset(dataset_name)
   fout = f'./llm_tod/llm_output/merge/{dataset_name}_{model_name.replace("/", "_")}_nlg_all_merge.json'
+  print(fout)
   with open(clean_result_path, 'r') as f:
     clean_results = json.load(f)
 
@@ -208,6 +215,7 @@ if __name__ == "__main__":
         pred_sys_rsp = normalizer.get_pred_sys_rsp(dialogue_id, response)
         if pred_sys_rsp:
           sys_rsp_merge = pred_sys_rsp
+          sys_rsp_merge['response'] = response
           add_no = pred_sys_rsp['num_not_in_response']
           rsp_cnt += len(pred_sys_rsp['sys_rsp'])
       elif len(clean_result['num_not_in_response']) > 0 and len(add_no) == 0:
@@ -218,6 +226,7 @@ if __name__ == "__main__":
         pred_sys_rsp = normalizer.get_pred_sys_rsp(dialogue_id, response)
         if pred_sys_rsp:
           sys_rsp_merge = copy.deepcopy(clean_result)
+          sys_rsp_merge['response'] = response
           for k, v in pred_sys_rsp['sys_rsp'].items():
             if k not in sys_rsp_merge['sys_rsp']:
               sys_rsp_merge['sys_rsp'][k] = v
@@ -231,14 +240,15 @@ if __name__ == "__main__":
         response = nlg.generate(dialogue_acts, texts, example_dialogs, domains, add_no)
         pred_sys_rsp = normalizer.get_pred_sys_rsp(dialogue_id, response)
         if pred_sys_rsp:
+          sys_rsp_merge['response'] += '\n\n'+response
           for k, v in pred_sys_rsp['sys_rsp'].items():
             if k not in sys_rsp_merge['sys_rsp']:
               sys_rsp_merge['sys_rsp'][k] = v
           add_no = [str(no+1) for no in range(gold_no) if str(no+1) not in list(sys_rsp_merge['sys_rsp'].keys())]
           rsp_cnt += len(sys_rsp_merge['sys_rsp'])
       max_cnt += 1
-    if max_cnt < 10:
-      dataset_sys_rsp.append(sys_rsp_merge)    
+    dataset_sys_rsp.append(sys_rsp_merge)
+    if len(sys_rsp_merge) > 0:
       with open(fout, 'a') as f:
         f.write(f'{json.dumps(sys_rsp_merge, ensure_ascii=False)}\n')
 
