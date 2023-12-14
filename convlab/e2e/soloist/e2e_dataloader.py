@@ -1,3 +1,4 @@
+import os
 import datasets
 import jsonlines
 import random
@@ -94,19 +95,19 @@ class Summarization(datasets.GeneratorBasedBuilder):
     def _split_generators(self, dl_manager):        
         
         data_name = self.config.data_name
-
+        # base_path = os.path.dirname(os.path.abspath(__file__))
         if data_name == 'joint':
-            train_path = f'./multiwoz/data/joint_train.jsonl'
-            validation_path = f'./multiwoz/data/single_validation.jsonl'
-            test_path = f'./multiwoz/data/single_test.jsonl'
+            train_path = './multiwoz/data/joint_train.jsonl'
+            validation_path = './multiwoz/data/single_validation.jsonl'
+            test_path = './multiwoz/data/single_test.jsonl'
         elif data_name == 'transfer':
-            train_path = f'./multiwoz/data/transfer_train.jsonl'
-            validation_path = f'./multiwoz/data/single_validation.jsonl'
-            test_path = f'./multiwoz/data/single_test.jsonl'
+            train_path = './multiwoz/data/transfer_train.jsonl'
+            validation_path = './multiwoz/data/single_validation.jsonl'
+            test_path = './multiwoz/data/single_test.jsonl'
         elif data_name == 'single':
-            train_path = f'./multiwoz/data/single_train.jsonl'
-            validation_path = f'./multiwoz/data/single_validation.jsonl'
-            test_path = f'./multiwoz/data/single_test.jsonl'
+            train_path = './multiwoz/data/single_train.jsonl'
+            validation_path = './multiwoz/data/single_validation.jsonl'
+            test_path = './multiwoz/data/single_test.jsonl'
         else:
             raise('Please specific dataset config.')
 

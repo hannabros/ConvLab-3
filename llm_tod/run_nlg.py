@@ -182,6 +182,7 @@ if __name__ == "__main__":
   api_type = config.get('API', 'name')
   model_name = config.get('MODEL', 'name')
   clean_result_path = config.get('CLEAN', 'path')
+  clean_only = config.getboolean('CLEAN', 'clean_only')
 
   dataset = load_dataset(dataset_name)
   fout = f'./llm_tod/llm_output/merge/{dataset_name}_{model_name.replace("/", "_")}_nlg_all_merge.json'
@@ -192,7 +193,14 @@ if __name__ == "__main__":
   # gpt_model : gpt-3.5-turbo, gpt-4-1106-preview
   nlg = LLM_NLG(dataset_name=dataset_name, api_type=api_type, model_name_or_path=model_name, speaker='system')
   # nlu = LLM_NLU('multiwoz21', 'huggingface', 'Llama-2-7b-chat-hf', 'user', example_dialogs)
-  test_datasets = dataset['test']
+  if clean_only:
+    clean_ids = list(set([result['id'] for result in clean_results]))
+    test_datasets = []
+    for data in dataset['test']:
+      if data['dialogue_id'] in clean_ids:
+        test_datasets.append(data)
+  else:
+    test_datasets = dataset['test']
   normalizer = NormalizeNLG(test_datasets)
   dataset_sys_rsp = []
   print(f'Total test dataset: {len(test_datasets)}')
@@ -208,7 +216,7 @@ if __name__ == "__main__":
     add_no = [] # 수집해야 할 대화 index
     sys_rsp_merge = {}
     max_cnt = 0
-    while rsp_cnt < gold_no and max_cnt < 10:
+    while rsp_cnt < gold_no and max_cnt < 20:
       if clean_result['sys_rsp'] == 'FAIL' and len(add_no) == 0:
         dialogue_acts, texts = get_das_texts(test_data)
         response = nlg.generate(dialogue_acts, texts, example_dialogs, domains)
@@ -216,7 +224,7 @@ if __name__ == "__main__":
         if pred_sys_rsp:
           sys_rsp_merge = pred_sys_rsp
           sys_rsp_merge['response'] = response
-          add_no = pred_sys_rsp['num_not_in_response']
+          add_no = [num+1 for num in pred_sys_rsp['num_not_in_response']]
           rsp_cnt += len(pred_sys_rsp['sys_rsp'])
       elif len(clean_result['num_not_in_response']) > 0 and len(add_no) == 0:
         no_to_new_generate = clean_result['num_not_in_response']

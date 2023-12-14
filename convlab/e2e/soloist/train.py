@@ -427,13 +427,14 @@ def main():
     # download the dataset.
     if args.dataset_name is not None:
         # Downloading and loading a dataset from the hub.
+        # raw_datasets = load_dataset(os.path.join(os.path.dirname(os.path.abspath(__file__)), args.dataset_name), args.dataset_config_name)
         raw_datasets = load_dataset(args.dataset_name, args.dataset_config_name)
     else:
         data_files = {}
         if args.train_file is not None:
             data_files["train"] = args.train_file
         if args.validation_file is not None:
-            data_files["validation"] = args.validation_file
+            data_files["validation"] = args.validation_filed
         extension = args.train_file.split(".")[-1]
         raw_datasets = load_dataset(extension, data_files=data_files)
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
@@ -683,8 +684,10 @@ def main():
             for i in range(0, len(lst), n):
                 yield lst[i:i + n]
 
-        metric = load_metric("./rouge_metric.py")
-        metric_bleu = load_metric("./bleu_metric.py")
+        # metric = load_metric("./rouge_metric.py")
+        metric = load_metric('rouge')
+        # metric_bleu = load_metric("./bleu_metric.py")
+        metric_bleu = load_metric('sacrebleu')
         decoded_preds_all = []
         for step, batch in enumerate(eval_dataloader):
             with torch.no_grad():

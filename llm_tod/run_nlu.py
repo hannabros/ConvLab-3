@@ -158,6 +158,7 @@ if __name__ == "__main__":
   api_type = config.get('API', 'name')
   model_name = config.get('MODEL', 'name')
   clean_result_path = config.get('CLEAN', 'path')
+  clean_only = config.getboolean('CLEAN', 'clean_only')
 
   dataset = load_dataset(dataset_name)
   fout = f'./llm_tod/llm_output/merge/{dataset_name}_{model_name.replace("/", "_")}_nlu_all_merge.json'
@@ -167,7 +168,14 @@ if __name__ == "__main__":
   # gpt_model : gpt-3.5-turbo, gpt-4-1106-preview
   nlu = LLM_NLU(dataset_name=dataset_name, api_type=api_type, model_name_or_path=model_name, speaker='user')
   # nlu = LLM_NLU('multiwoz21', 'huggingface', 'Llama-2-7b-chat-hf', 'user', example_dialogs)
-  test_datasets = dataset['test']
+  if clean_only:
+    clean_ids = list(set([result['id'] for result in clean_results]))
+    test_datasets = []
+    for data in dataset['test']:
+      if data['dialogue_id'] in clean_ids:
+        test_datasets.append(data)
+  else:
+    test_datasets = dataset['test']
   normalizer = NormalizeNLU(test_datasets)
 
   dataset_pred_das = []
@@ -184,7 +192,7 @@ if __name__ == "__main__":
     add_no = [] # 수집해야 할 대화 index
     pred_das_merge = {}
     max_cnt = 0
-    while pred_cnt < gold_no and max_cnt < 10:
+    while pred_cnt < gold_no and max_cnt < 20:
       if clean_result['das'] == 'FAIL' and len(add_no) == 0:
         texts, utterances = get_texts_contexts(test_data)
         response = nlu.predict(texts, utterances, domains, example_dialogs)
@@ -221,7 +229,7 @@ if __name__ == "__main__":
           pred_cnt = len(pred_das_merge['das'])
       max_cnt += 1
       # print(pred_cnt)
-    if max_cnt < 10:
+    if max_cnt < 20:
       dataset_pred_das.append(pred_das_merge)
       with open(fout, 'a') as f:
         f.write(f'{json.dumps(pred_das_merge, ensure_ascii=False)}\n')
